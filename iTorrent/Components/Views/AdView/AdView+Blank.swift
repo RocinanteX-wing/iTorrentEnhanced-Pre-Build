@@ -7,6 +7,6 @@
 
 import Foundation
 
-#if !canImport(UnityAds) && !canImport(GoogleMobileAds) && !canImport(FBAudienceNetwork)
+// Inert placeholder: the layout (TorrentListViewController.xib) still references an AdView outlet.
+// iTorrent Enhanced contains no advertising code or SDK.
 class AdView: BaseView {}
-#endif
