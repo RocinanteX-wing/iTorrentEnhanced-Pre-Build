@@ -1,0 +1,240 @@
+# Baseline build: UNMODIFIED iTorrent (upstream main @ 145e0e0), unsigned.
+#
+# Purpose: prove the toolchain (hosted macOS runner, Xcode, SwiftPM, LibTorrent/CMake/Boost)
+# before any change is made. The resulting IPA is a build proof, NOT meant to be installed or run:
+# it embeds a placeholder GoogleService-Info.plist that is generated here and never committed.
+#
+# No Apple credentials, certificates, provisioning profiles or repository secrets are used.
+# Run manually: GitHub > Actions > "Baseline (unmodified iTorrent, unsigned)" > Run workflow.
+
+name: Baseline (unmodified iTorrent, unsigned)
+
+on:
+  workflow_dispatch:
+    inputs:
+      xcode_app:
+        description: "Xcode folder under /Applications (e.g. Xcode_27.2.app). Blank = image default."
+        required: false
+        default: "Xcode_27.2.app"
+      use_cache:
+        description: "Cache the LibTorrent (CMake) build between runs"
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: baseline-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build unmodified iTorrent (unsigned)
+    # Same hosted image label the upstream project uses. Checked on 2026-11-21 against
+    # https://github.com/actions/runner-images : image "xcode-27" (arm64, Xcode 27.0 / 27.1 / 27.2).
+    runs-on: xcode-27
+    timeout-minutes: 150
+    defaults:
+      run:
+        shell: bash
+    env:
+      WORKSPACE_FILE: iTorrent.xcworkspace
+      SCHEME: iTorrent
+      BUILD_ROOT: ${{ github.workspace }}/_ci
+      XCODE_APP: ${{ inputs.xcode_app }}
+
+    steps:
+      - name: Checkout (recursive submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Select Xcode
+        run: |
+          set -euo pipefail
+          echo "Installed Xcode apps:"; ls -d /Applications/Xcode* || true
+          if [ -n "${XCODE_APP}" ]; then
+            if [ -d "/Applications/${XCODE_APP}" ]; then
+              sudo xcode-select -s "/Applications/${XCODE_APP}/Contents/Developer"
+            else
+              echo "::warning::/Applications/${XCODE_APP} not found; using the image default"
+            fi
+          fi
+
+      - name: Show tooling
+        run: |
+          set -euo pipefail
+          sw_vers
+          uname -m
+          xcode-select -p
+          xcodebuild -version
+          xcodebuild -showsdks
+          xcrun --sdk iphoneos --show-sdk-version
+          swift --version
+          cmake --version
+          brew --version | head -1
+          git --version
+
+      - name: Verify pinned dependency revisions
+        run: |
+          set -euo pipefail
+          check() {
+            local path="$1" expected="$2" actual
+            actual="$(git -C "$path" rev-parse HEAD)"
+            echo "$path -> $actual"
+            if [ "$actual" != "$expected" ]; then
+              echo "::error::Pin mismatch for $path (expected $expected)"
+              exit 1
+            fi
+          }
+          check Submodules/GCDWebServer                           993173736fa84a4174d2e3bc13cc746576025841
+          check Submodules/LibTorrent-Swift                       82735476b1f7666058447a6d9a39b100e98c1208
+          check Submodules/MVVMFoundation                         516f6dd163894b291f5589bb0e75004e2c2e39f6
+          check Submodules/SwiftVLC                               f83a0368715a2b8e156fb06f87fc3d1729f93cc2
+          check Submodules/LibTorrent-Swift/Thirdparty/libtorrent 6da363d2994f17c0b3c0450d124cf73a31a73847
+          echo "All pinned revisions match the audited baseline."
+
+      - name: Install Boost (Homebrew)
+        run: |
+          set -euo pipefail
+          brew install boost
+          brew list --versions boost
+
+      - name: Compute cache key
+        id: keys
+        run: |
+          set -euo pipefail
+          fp="$({ xcodebuild -version; xcrun --sdk iphoneos --show-sdk-build-version; cmake --version | head -1; brew list --versions boost; echo "$GITHUB_WORKSPACE"; } | shasum -a 256 | cut -d' ' -f1)"
+          echo "toolchain=$fp" >> "$GITHUB_OUTPUT"
+
+      - name: Restore LibTorrent build cache
+        id: libtorrent_cache
+        if: ${{ inputs.use_cache }}
+        uses: actions/cache@v4
+        with:
+          path: Submodules/LibTorrent-Swift/libtorrent-build
+          key: libtorrent-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.toolchain }}-82735476b1f7-6da363d2994f-${{ hashFiles('Submodules/LibTorrent-Swift/make.sh') }}
+
+      - name: Prepare LibTorrent (CMake)
+        if: ${{ steps.libtorrent_cache.outputs.cache-hit != 'true' }}
+        run: |
+          set -euo pipefail
+          zsh Submodules/LibTorrent-Swift/make.sh
+
+      # The project references iTorrent/Core/Assets/GoogleService-Info.plist as a resource, and that
+      # file is git-ignored upstream (the author injects it from a secret). Generate an obviously
+      # fake placeholder so the resource-copy step succeeds. No tracked source file is modified.
+      - name: Create placeholder GoogleService-Info.plist (not committed)
+        run: |
+          set -euo pipefail
+          P=iTorrent/Core/Assets/GoogleService-Info.plist
+          rm -f "$P"
+          pb() { /usr/libexec/PlistBuddy -c "$1" "$P" >/dev/null; }
+          pb "Add :API_KEY string PLACEHOLDER-NOT-A-REAL-KEY"
+          pb "Add :GCM_SENDER_ID string 000000000000"
+          pb "Add :PLIST_VERSION string 1"
+          pb "Add :BUNDLE_ID string com.xitrix.iTorrent2"
+          pb "Add :PROJECT_ID string placeholder-project"
+          pb "Add :STORAGE_BUCKET string placeholder-project.appspot.com"
+          pb "Add :IS_ADS_ENABLED bool false"
+          pb "Add :IS_ANALYTICS_ENABLED bool false"
+          pb "Add :IS_APPINVITE_ENABLED bool false"
+          pb "Add :IS_GCM_ENABLED bool false"
+          pb "Add :IS_SIGNIN_ENABLED bool false"
+          pb "Add :GOOGLE_APP_ID string 1:000000000000:ios:0000000000000000"
+          plutil -lint "$P"
+
+      - name: List schemes
+        run: |
+          set -euo pipefail
+          xcodebuild -list -workspace "$WORKSPACE_FILE"
+
+      - name: Resolve Swift packages
+        run: |
+          set -euo pipefail
+          mkdir -p "$BUILD_ROOT"
+          xcodebuild -resolvePackageDependencies \
+            -workspace "$WORKSPACE_FILE" -scheme "$SCHEME" \
+            -clonedSourcePackagesDirPath "$BUILD_ROOT/SourcePackages"
+          # The pins are part of the audited baseline and must not be rewritten.
+          git diff --stat -- iTorrent.xcworkspace/xcshareddata/swiftpm/Package.resolved
+          git diff --exit-code -- iTorrent.xcworkspace/xcshareddata/swiftpm/Package.resolved
+
+      - name: Build (Release, iphoneos, unsigned)
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -workspace "$WORKSPACE_FILE" -scheme "$SCHEME" \
+            -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
+            -derivedDataPath "$BUILD_ROOT/DerivedData" \
+            -clonedSourcePackagesDirPath "$BUILD_ROOT/SourcePackages" \
+            -onlyUsePackageVersionsFromResolvedFile -skipMacroValidation \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" PROVISIONING_PROFILE_SPECIFIER="" \
+            2>&1 | tee "$BUILD_ROOT/xcodebuild.log" \
+            | { if command -v xcbeautify >/dev/null 2>&1; then xcbeautify --renderer github-actions; else cat; fi; }
+
+      - name: Verify application bundle
+        run: |
+          set -euo pipefail
+          PRODUCTS="$BUILD_ROOT/DerivedData/Build/Products/Release-iphoneos"
+          APP="$PRODUCTS/iTorrent.app"
+          if [ ! -d "$APP" ]; then
+            echo "::error::iTorrent.app not found"
+            find "$BUILD_ROOT/DerivedData/Build/Products" -maxdepth 2 -print
+            exit 1
+          fi
+          pb() { /usr/libexec/PlistBuddy -c "Print :$1" "$APP/Info.plist"; }
+          EXE="$(pb CFBundleExecutable)"
+          echo "CFBundleIdentifier : $(pb CFBundleIdentifier)"
+          echo "Version / build    : $(pb CFBundleShortVersionString) / $(pb CFBundleVersion)"
+          echo "MinimumOSVersion   : $(pb MinimumOSVersion)"
+          echo "Executable archs   : $(lipo -archs "$APP/$EXE")"
+          echo "--- PlugIns:";    ls -1 "$APP/PlugIns"    2>/dev/null || { echo "::error::no PlugIns directory"; exit 1; }
+          echo "--- Frameworks:"; ls -1 "$APP/Frameworks" 2>/dev/null || echo "(none)"
+          ls "$APP"/PlugIns/*.appex >/dev/null
+          echo "--- Code signature (expected: not signed):"
+          codesign -dv "$APP" 2>&1 | head -3 || true
+
+      - name: Package unsigned IPA
+        run: |
+          set -euo pipefail
+          PRODUCTS="$BUILD_ROOT/DerivedData/Build/Products/Release-iphoneos"
+          rm -rf "$BUILD_ROOT/ipa" && mkdir -p "$BUILD_ROOT/ipa/Payload"
+          cp -R "$PRODUCTS/iTorrent.app" "$BUILD_ROOT/ipa/Payload/"
+          (cd "$BUILD_ROOT/ipa" && zip -qry "../iTorrent-baseline-unsigned.ipa" Payload)
+          ls -lh "$BUILD_ROOT/iTorrent-baseline-unsigned.ipa"
+          shasum -a 256 "$BUILD_ROOT/iTorrent-baseline-unsigned.ipa"
+          unzip -l "$BUILD_ROOT/iTorrent-baseline-unsigned.ipa" | grep -E "Payload/[^/]+\.app/(Info.plist|PlugIns/[^/]+/Info.plist)$"
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "### Baseline build (unmodified iTorrent, unsigned)"
+            echo "- Commit: \`${GITHUB_SHA}\`"
+            echo "- Xcode: $(xcodebuild -version | tr '\n' ' ')"
+            echo "- iOS SDK: $(xcrun --sdk iphoneos --show-sdk-version)"
+            echo "- Boost: $(brew list --versions boost)"
+            echo "- Result: \`${{ job.status }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload IPA
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: iTorrent-baseline-unsigned-ipa
+          path: ${{ env.BUILD_ROOT }}/iTorrent-baseline-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: baseline-build-log
+          path: ${{ env.BUILD_ROOT }}/xcodebuild.log
+          if-no-files-found: warn
+          retention-days: 14
