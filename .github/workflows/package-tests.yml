@@ -1,0 +1,92 @@
+# Unit and integration tests for the two local Swift packages, plus an iOS compile of the HTTP engine.
+# No secrets, no signing. Runs on pushes that touch the packages, or manually.
+
+name: Package tests (DownloadSupport, HttpDownloadCore)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "DownloadSupport/**"
+      - "HttpDownloadCore/**"
+      - "tools/**"
+      - ".github/workflows/package-tests.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: package-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: swift test + iOS compile
+    runs-on: xcode-27
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout (packages only; no submodules needed)
+        uses: actions/checkout@v4
+
+      - name: Show tooling
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          swift --version
+          python3 --version
+
+      - name: Test DownloadSupport
+        working-directory: DownloadSupport
+        run: swift test 2>&1 | tee "$RUNNER_TEMP/downloadsupport-test.log"
+
+      - name: Start local HTTP test server
+        run: |
+          set -euo pipefail
+          python3 tools/http_test_server.py --host 127.0.0.1 --port 8765 > "$RUNNER_TEMP/test-server.log" 2>&1 &
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8765/reset > /dev/null && break || sleep 1
+          done
+          curl -sf http://127.0.0.1:8765/reset
+
+      - name: Test HttpDownloadCore (unit tests + real-HTTP integration tests)
+        working-directory: HttpDownloadCore
+        env:
+          HTTP_TEST_SERVER: http://127.0.0.1:8765
+        run: |
+          set -o pipefail
+          swift test 2>&1 | tee "$RUNNER_TEMP/httpdownloadcore-test.log"
+
+      - name: Compile HttpDownloadCore for iOS (includes the background URLSession transport)
+        working-directory: HttpDownloadCore
+        run: |
+          set -o pipefail
+          xcodebuild build -scheme HttpDownloadCore -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/httpdownloadcore-ios.log" | tail -25
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Package tests"
+            for f in downloadsupport-test httpdownloadcore-test; do
+              echo "- $f: $(grep -E 'Executed [0-9]+ tests' "$RUNNER_TEMP/$f.log" 2>/dev/null | tail -1 | sed 's/^[[:space:]]*//')"
+            done
+            echo "- iOS compile: $(grep -E 'BUILD (SUCCEEDED|FAILED)' "$RUNNER_TEMP/httpdownloadcore-ios.log" 2>/dev/null | tail -1)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-test-logs
+          path: |
+            ${{ runner.temp }}/downloadsupport-test.log
+            ${{ runner.temp }}/httpdownloadcore-test.log
+            ${{ runner.temp }}/httpdownloadcore-ios.log
+            ${{ runner.temp }}/test-server.log
+          if-no-files-found: warn
+          retention-days: 14
