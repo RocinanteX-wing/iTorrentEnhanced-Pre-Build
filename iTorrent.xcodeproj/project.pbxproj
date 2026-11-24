@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		7E00A0012F00000100E10003 /* HttpDownloadCore in Frameworks */ = {isa = PBXBuildFile; productRef = 7E00A0012F00000100E10002 /* HttpDownloadCore */; };
 		C0DE000130B0000000000001 /* OneShotCallback.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DE000130B0000000000002 /* OneShotCallback.swift */; };
 		7C013DE32C28AA3C0026A11B /* sound.m4a in Resources */ = {isa = PBXBuildFile; fileRef = 7C013DE22C28A97F0026A11B /* sound.m4a */; };
 		7C013DE42C2F38AA0026A11B /* LocalizationAttribute.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1352D1D2BBC2F7F00104E7B /* LocalizationAttribute.swift */; };
@@ -585,6 +586,7 @@
 				7CF6DA332C0F112B0033D03F /* OpenSSL in Frameworks */,
 				D1DB71832BD80318007F9267 /* GCDWebServers in Frameworks */,
 				D1ACFDDA2AF7D55F0098FF56 /* MvvmFoundation in Frameworks */,
+				7E00A0012F00000100E10003 /* HttpDownloadCore in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1685,6 +1687,7 @@
 				7C5B73702F73288F00CC2B6C /* CombineCocoa */,
 				7C36BB002FDA0FCE006C240E /* Perception */,
 				7C1CB7292FDB4597000CCD0D /* SwiftVLC */,
+				7E00A0012F00000100E10002 /* HttpDownloadCore */,
 			);
 			productName = iTorrent;
 			productReference = D1A2269A2AEEEFCC00669D6D /* iTorrent.app */;
@@ -1733,6 +1736,7 @@
 				7C5B736F2F73288F00CC2B6C /* XCRemoteSwiftPackageReference "CombineCocoa" */,
 				7C36BAFF2FDA0FCE006C240E /* XCRemoteSwiftPackageReference "swift-perception" */,
 				7C1CB7282FDB4597000CCD0D /* XCLocalSwiftPackageReference "Submodules/SwiftVLC" */,
+				7E00A0012F00000100E10001 /* XCLocalSwiftPackageReference "HttpDownloadCore" */,
 			);
 			productRefGroup = D1A2269B2AEEEFCC00669D6D /* Products */;
 			projectDirPath = "";
@@ -2659,6 +2663,10 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
+		7E00A0012F00000100E10001 /* XCLocalSwiftPackageReference "HttpDownloadCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = HttpDownloadCore;
+		};
 		7C1CB7282FDB4597000CCD0D /* XCLocalSwiftPackageReference "Submodules/SwiftVLC" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Submodules/SwiftVLC;
@@ -2717,6 +2725,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		7E00A0012F00000100E10002 /* HttpDownloadCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 7E00A0012F00000100E10001 /* XCLocalSwiftPackageReference "HttpDownloadCore" */;
+			productName = HttpDownloadCore;
+		};
 		7C1CB7292FDB4597000CCD0D /* SwiftVLC */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = SwiftVLC;
