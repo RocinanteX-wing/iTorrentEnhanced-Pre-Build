@@ -109,13 +109,26 @@ final class ManagerFailureTests: ManagerTestCase {
     }
 
     func testUnavailableServerIsProbedAgainThenRecovers() async throws {
-        let server = FakeServer(size: 4 * MiB)
-        let t = FakeTransport(server: server)
-        t.probeOverride = ProbeResponses(head: HTTPResponseInfo(statusCode: 503), rangeProbe: HTTPResponseInfo(statusCode: 503))
-        let m = makeManager(t, settings: settings(retries: 1_000)); await m.start()
+        let t = FakeTransport(server: FakeServer(size: 4 * MiB))
+        t.failNextProbes(3)                                                     // three 503s, then the server is healthy
+        let m = makeManager(t, settings: settings(retries: 5)); await m.start()
         let id = try await m.add(url: url)
-        await expectTrue(await eventually { await m.record(id)!.retryCount >= 2 })
-        t.probeOverride = nil
+        await expectTrue(await waitStatus(m, id, .completed))
+        await expectEqual(await m.record(id)!.retryCount, 3)                    // exactly the three failed probes
+        XCTAssertEqual(t.probesServed, 4)
+    }
+
+    func testProbeRetryBudgetExhaustedFailsInsteadOfLoopingForever() async throws {
+        let t = FakeTransport(server: FakeServer(size: 4 * MiB))
+        t.failNextProbes(1_000)
+        let m = makeManager(t, settings: settings(retries: 2)); await m.start()
+        let id = try await m.add(url: url)
+        await expectTrue(await waitStatus(m, id, .failed))
+        XCTAssertEqual(t.probesServed, 3)                                       // first try + 2 retries, then it stops
+        let failedRecord = await m.record(id)
+        XCTAssertTrue(failedRecord?.lastError?.contains("could not be reached") == true)
+        t.failNextProbes(0)
+        try await m.retry(id)                                                   // a manual retry gets a fresh budget
         await expectTrue(await waitStatus(m, id, .completed))
     }
 

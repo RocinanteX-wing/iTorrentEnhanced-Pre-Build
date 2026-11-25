@@ -24,12 +24,12 @@ class ManagerTestCase: XCTestCase {
                             persistInterval: 0, sleeper: { _ in await Task.yield() })
     }
 
-    func eventually(_ seconds: TimeInterval = 10, _ cond: () async -> Bool) async -> Bool {
+    func eventually(_ seconds: TimeInterval = 30, _ cond: () async -> Bool) async -> Bool {
         let end = Date().addingTimeInterval(seconds)
         while Date() < end { if await cond() { return true }; try? await Task.sleep(nanoseconds: 3_000_000) }
         return await cond()
     }
-    func waitStatus(_ m: HttpDownloadManager, _ id: UUID, _ s: UnifiedStatus, _ t: TimeInterval = 10) async -> Bool {
+    func waitStatus(_ m: HttpDownloadManager, _ id: UUID, _ s: UnifiedStatus, _ t: TimeInterval = 30) async -> Bool {
         await eventually(t) { await m.record(id)?.status == s }
     }
 

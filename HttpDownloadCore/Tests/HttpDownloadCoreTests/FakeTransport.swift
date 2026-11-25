@@ -101,7 +101,17 @@ final class FakeTransport: HttpTransport, @unchecked Sendable {
     private(set) var started: [ChunkRequestSpec] = []
     private(set) var cancelled: [UUID] = []
     var liveOnRelaunch: Set<LiveChunk> = []
-    var probeOverride: ProbeResponses?
+    private var _probeOverride: ProbeResponses?
+    private var _probeFailures = 0
+    private var _probesServed = 0
+    /// Always answer probes with this (lock-protected: the manager reads it from another thread).
+    var probeOverride: ProbeResponses? {
+        get { lock.lock(); defer { lock.unlock() }; return _probeOverride }
+        set { lock.lock(); _probeOverride = newValue; lock.unlock() }
+    }
+    /// The next `n` probes answer 503, then the server is healthy again. Deterministic, unlike flipping a flag from a test.
+    func failNextProbes(_ n: Int) { lock.lock(); _probeFailures = n; lock.unlock() }
+    var probesServed: Int { lock.lock(); defer { lock.unlock() }; return _probesServed }
 
     init(server: FakeServer) {
         self.server = server
@@ -110,7 +120,18 @@ final class FakeTransport: HttpTransport, @unchecked Sendable {
         cont = c
     }
 
-    func probe(url: URL, headers: [String: String], allowsCellular: Bool) async -> ProbeResponses { probeOverride ?? server.probe() }
+    func probe(url: URL, headers: [String: String], allowsCellular: Bool) async -> ProbeResponses {
+        lock.lock()
+        _probesServed += 1
+        if _probeFailures > 0 {
+            _probeFailures -= 1
+            lock.unlock()
+            return ProbeResponses(head: HTTPResponseInfo(statusCode: 503), rangeProbe: HTTPResponseInfo(statusCode: 503))
+        }
+        let override = _probeOverride
+        lock.unlock()
+        return override ?? server.probe()
+    }
 
     func start(_ spec: ChunkRequestSpec) {
         lock.lock()
